@@ -1,36 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lyzr Voice Agent Sandbox
 
-## Getting Started
+Simple standalone app to test your Lyzr Studio voice agent with:
+- one big mic button
+- live transcript feed (you + agent)
+- quick deploy path to Vercel
 
-First, run the development server:
+## 1) Local setup
+
+Create your env file:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Set values in `.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+LYZR_API_KEY=your_lyzr_api_key
+LYZR_AGENT_ID=69c2cefaacdaaa90b7005cd5
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Install + run:
 
-## Learn More
+```bash
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open [http://localhost:3000](http://localhost:3000), click **Start Mic**, allow microphone access, and start speaking.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 2) Vercel deploy (quick)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Push this folder to a GitHub repo (or include it in an existing repo).
+2. Import project in Vercel.
+3. In Vercel project settings, add environment variables:
+   - `LYZR_API_KEY`
+   - `LYZR_AGENT_ID`
+4. Deploy.
 
-## Deploy on Vercel
+## Notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- API key is used only in server routes (`app/api/session/start` and `app/api/session/end`) and never exposed in browser code.
+- Session lifecycle:
+  - Start: `POST /v1/session/start`
+  - End: `POST /v1/session/end`

@@ -1,65 +1,223 @@
-import Image from "next/image";
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Room, RoomEvent, Track } from "livekit-client";
+
+type TranscriptItem = {
+  id: string;
+  speaker: "agent" | "you";
+  text: string;
+};
+
+type StartSessionResponse = {
+  roomName?: string;
+  url?: string;
+  serverUrl?: string;
+  wsUrl?: string;
+  livekitUrl?: string;
+  token?: string;
+  userToken?: string;
+  room?: { name?: string };
+};
 
 export default function Home() {
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
+  const roomRef = useRef<Room | null>(null);
+  const roomNameRef = useRef<string | null>(null);
+  const transcriptBoxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!transcriptBoxRef.current) return;
+    transcriptBoxRef.current.scrollTop = transcriptBoxRef.current.scrollHeight;
+  }, [transcripts]);
+
+  const stopConversation = useCallback(async () => {
+    const room = roomRef.current;
+
+    if (room) {
+      await room.localParticipant.setMicrophoneEnabled(false);
+      room.disconnect();
+      roomRef.current = null;
+    }
+
+    if (roomNameRef.current) {
+      try {
+        await fetch("/api/session/end", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomName: roomNameRef.current }),
+        });
+      } catch {
+        // Ignore end errors during cleanup.
+      }
+      roomNameRef.current = null;
+    }
+
+    setIsConnected(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      void stopConversation();
+    };
+  }, [stopConversation]);
+
+  async function startConversation() {
+    setError(null);
+    setIsConnecting(true);
+
+    try {
+      const startRes = await fetch("/api/session/start", { method: "POST" });
+      const startBody = (await startRes.json()) as StartSessionResponse & {
+        error?: string;
+      };
+
+      if (!startRes.ok) {
+        throw new Error(startBody.error || "Failed to start voice session.");
+      }
+
+      const serverUrl =
+        startBody.url ||
+        startBody.serverUrl ||
+        startBody.wsUrl ||
+        startBody.livekitUrl ||
+        "";
+      const token = startBody.userToken || startBody.token || "";
+      const roomName = startBody.roomName || startBody.room?.name || null;
+
+      if (!serverUrl || !token) {
+        throw new Error(
+          "Session start response missing url/token. Check your Lyzr agent session response."
+        );
+      }
+
+      roomNameRef.current = roomName;
+      const room = new Room();
+
+      room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
+        const speaker: "agent" | "you" =
+          participant?.identity?.toLowerCase().includes("agent") ? "agent" : "you";
+
+        const lines = segments
+          .filter((segment) => segment.final && segment.text.trim().length > 0)
+          .map((segment) => ({
+            id: `${segment.id}-${Date.now()}`,
+            speaker,
+            text: segment.text.trim(),
+          }));
+
+        if (lines.length > 0) {
+          setTranscripts((prev) => [...prev, ...lines]);
+        }
+      });
+
+      room.on(RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind !== Track.Kind.Audio) return;
+        const mediaElement = track.attach();
+        if (mediaElement instanceof HTMLAudioElement) {
+          mediaElement.autoplay = true;
+          mediaElement.style.display = "none";
+          document.body.appendChild(mediaElement);
+        }
+      });
+
+      room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        track.detach().forEach((el) => el.remove());
+      });
+
+      room.on(RoomEvent.Disconnected, () => {
+        setIsConnected(false);
+      });
+
+      await room.connect(serverUrl, token);
+      await room.localParticipant.setMicrophoneEnabled(true);
+
+      roomRef.current = room;
+      setIsConnected(true);
+      setTranscripts((prev) => [
+        ...prev,
+        {
+          id: `status-${Date.now()}`,
+          speaker: "agent",
+          text: "Voice session connected. You can start speaking.",
+        },
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unknown error.");
+      await stopConversation();
+    } finally {
+      setIsConnecting(false);
+    }
+  }
+
+  async function toggleConversation() {
+    if (isConnecting) return;
+    if (isConnected) {
+      await stopConversation();
+      return;
+    }
+    await startConversation();
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-2xl rounded-2xl border border-neutral-800 bg-neutral-900 p-6 sm:p-8 flex flex-col gap-6">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold">Lyzr Voice Agent Test</h1>
+          <p className="text-sm text-neutral-400">
+            Click the mic, speak, and verify agent replies + transcripts.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+        <div className="flex justify-center">
+          <button
+            onClick={toggleConversation}
+            disabled={isConnecting}
+            className={[
+              "w-32 h-32 rounded-full font-semibold text-sm transition-all",
+              "flex items-center justify-center border",
+              isConnected
+                ? "bg-red-500/90 border-red-400 text-white shadow-[0_0_40px_rgba(239,68,68,0.35)]"
+                : "bg-emerald-500/90 border-emerald-300 text-white shadow-[0_0_40px_rgba(16,185,129,0.35)]",
+              isConnecting ? "opacity-60 cursor-not-allowed" : "hover:scale-[1.02]",
+            ].join(" ")}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            {isConnecting ? "Connecting..." : isConnected ? "Stop" : "Start Mic"}
+          </button>
         </div>
-      </main>
-    </div>
+
+        {error && (
+          <div className="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+            {error}
+          </div>
+        )}
+
+        <div
+          ref={transcriptBoxRef}
+          className="rounded-xl border border-neutral-800 bg-neutral-950/50 p-3 h-80 overflow-y-auto flex flex-col gap-2"
+        >
+          {transcripts.length === 0 ? (
+            <p className="text-sm text-neutral-500">
+              Transcripts will appear here...
+            </p>
+          ) : (
+            transcripts.map((item) => (
+              <div
+                key={item.id}
+                className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2"
+              >
+                <p className="text-[11px] uppercase tracking-wide text-neutral-400 mb-1">
+                  {item.speaker}
+                </p>
+                <p className="text-sm text-neutral-100">{item.text}</p>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </main>
   );
 }
